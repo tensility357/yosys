@@ -6,11 +6,11 @@ GENFILES += frontends/verilog/verilog_lexer.cc
 
 frontends/verilog/verilog_parser.tab.cc: frontends/verilog/verilog_parser.y
 	$(Q) mkdir -p $(dir $@)
-	$(P) $(BISON) -o $@ -d -r all -b frontends/verilog/verilog_parser $<
+	$(P) $(BISON) -Werror=conflicts-sr,error=conflicts-rr -o $@ -d -r all -b frontends/verilog/verilog_parser $<
 
 frontends/verilog/verilog_parser.tab.hh: frontends/verilog/verilog_parser.tab.cc
 
-frontends/verilog/verilog_lexer.cc: frontends/verilog/verilog_lexer.l
+frontends/verilog/verilog_lexer.cc: frontends/verilog/verilog_lexer.l frontends/verilog/verilog_parser.tab.cc
 	$(Q) mkdir -p $(dir $@)
 	$(P) flex -o frontends/verilog/verilog_lexer.cc $<
 

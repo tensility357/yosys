@@ -29,7 +29,7 @@ struct SynthPass : public ScriptPass
 {
 	SynthPass() : ScriptPass("synth", "generic synthesis script") { }
 
-	void help() YS_OVERRIDE
+	void help() override
 	{
 		//   |---v---|---v---|---v---|---v---|---v---|---v---|---v---|---v---|---v---|---v---|
 		log("\n");
@@ -75,17 +75,23 @@ struct SynthPass : public ScriptPass
 		log("        from label is synonymous to 'begin', and empty to label is\n");
 		log("        synonymous to the end of the command list.\n");
 		log("\n");
+		log("    -abc9\n");
+		log("        use new ABC9 flow (EXPERIMENTAL)\n");
+		log("\n");
+		log("    -flowmap\n");
+		log("        use FlowMap LUT techmapping instead of ABC\n");
+		log("\n");
 		log("\n");
 		log("The following commands are executed by this synthesis command:\n");
 		help_script();
 		log("\n");
 	}
 
-	string top_module, fsm_opts, memory_opts;
-	bool autotop, flatten, noalumacc, nofsm, noabc, noshare;
+	string top_module, fsm_opts, memory_opts, abc;
+	bool autotop, flatten, noalumacc, nofsm, noabc, noshare, flowmap;
 	int lut;
 
-	void clear_flags() YS_OVERRIDE
+	void clear_flags() override
 	{
 		top_module.clear();
 		fsm_opts.clear();
@@ -98,9 +104,11 @@ struct SynthPass : public ScriptPass
 		nofsm = false;
 		noabc = false;
 		noshare = false;
+		flowmap = false;
+		abc = "abc";
 	}
 
-	void execute(std::vector<std::string> args, RTLIL::Design *design) YS_OVERRIDE
+	void execute(std::vector<std::string> args, RTLIL::Design *design) override
 	{
 		string run_from, run_to;
 		clear_flags();
@@ -159,12 +167,25 @@ struct SynthPass : public ScriptPass
 				noshare = true;
 				continue;
 			}
+			if (args[argidx] == "-abc9") {
+				abc = "abc9";
+				continue;
+			}
+			if (args[argidx] == "-flowmap") {
+				flowmap = true;
+				continue;
+			}
 			break;
 		}
 		extra_args(args, argidx, design);
 
 		if (!design->full_selection())
 			log_cmd_error("This command only operates on fully selected designs!\n");
+
+		if (abc == "abc9" && !lut)
+			log_cmd_error("ABC9 flow only supported for FPGA synthesis (using '-lut' option)\n");
+		if (flowmap && !lut)
+			log_cmd_error("FlowMap is only supported for FPGA synthesis (using '-lut' option)\n");
 
 		log_header(design, "Executing SYNTH pass.\n");
 		log_push();
@@ -174,7 +195,7 @@ struct SynthPass : public ScriptPass
 		log_pop();
 	}
 
-	void script() YS_OVERRIDE
+	void script() override
 	{
 		if (check_label("begin"))
 		{
@@ -204,9 +225,9 @@ struct SynthPass : public ScriptPass
 			run("peepopt");
 			run("opt_clean");
 			if (help_mode)
-				run("techmap -map +/cmp2lut.v", " (if -lut)");
-			else
-				run(stringf("techmap -map +/cmp2lut.v -D LUT_WIDTH=%d", lut));
+				run("techmap -map +/cmp2lut.v -map +/cmp2lcu.v", " (if -lut)");
+			else if (lut)
+				run(stringf("techmap -map +/cmp2lut.v -map +/cmp2lcu.v -D LUT_WIDTH=%d", lut));
 			if (!noalumacc)
 				run("alumacc", "  (unless -noalumacc)");
 			if (!noshare)
@@ -229,27 +250,32 @@ struct SynthPass : public ScriptPass
 			{
 				run("techmap -map +/gate2lut.v", "(if -noabc and -lut)");
 				run("clean; opt_lut", "           (if -noabc and -lut)");
+				run("flowmap -maxlut K", "        (if -flowmap and -lut)");
 			}
 			else if (noabc && lut)
 			{
 				run(stringf("techmap -map +/gate2lut.v -D LUT_WIDTH=%d", lut));
 				run("clean; opt_lut");
 			}
+			else if (flowmap)
+			{
+				run(stringf("flowmap -maxlut %d", lut));
+			}
 			run("opt -fast");
 
-			if (!noabc) {
+			if (!noabc && !flowmap) {
 		#ifdef YOSYS_ENABLE_ABC
 				if (help_mode)
 				{
-					run("abc -fast", "       (unless -noabc, unless -lut)");
-					run("abc -fast -lut k", "(unless -noabc, if -lut)");
+					run(abc + " -fast", "       (unless -noabc, unless -lut)");
+					run(abc + " -fast -lut k", "(unless -noabc, if -lut)");
 				}
 				else
 				{
 					if (lut)
-						run(stringf("abc -fast -lut %d", lut));
+						run(stringf("%s -fast -lut %d", abc.c_str(), lut));
 					else
-						run("abc -fast");
+						run(abc + " -fast");
 				}
 				run("opt -fast", "       (unless -noabc)");
 		#endif
